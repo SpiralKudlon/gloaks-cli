@@ -64,5 +64,12 @@ class TestGloaksScanner(unittest.TestCase):
         self.assertEqual(result['isp'], 'Google')
         self.assertEqual(result['city'], 'Mountain View')
 
+    @patch('scanner.requests.get')
+    def test_geo_locate_failure(self, mock_get):
+        """Test geo location returns None on error."""
+        mock_get.side_effect = scanner.requests.exceptions.RequestException
+        result = scanner.geo_locate("8.8.8.8")
+        self.assertIsNone(result)
+
 if __name__ == '__main__':
     unittest.main()

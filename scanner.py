@@ -1,5 +1,6 @@
 import socket
 import requests
+import concurrent.futures
 
 def get_ip(target):
     try:
@@ -15,8 +16,6 @@ def scan_headers(target):
         return dict(response.headers)
     except requests.exceptions.RequestException:
         return None
-
-import concurrent.futures
 
 def check_port(target_ip, port):
     """Helper function to check a single port."""
@@ -54,5 +53,5 @@ def geo_locate(ip):
             "lat": response.get("lat"),
             "lon": response.get("lon")
         }
-    except Exception:
+    except (requests.exceptions.RequestException, ValueError):
         return None
