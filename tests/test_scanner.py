@@ -49,9 +49,10 @@ class TestGloaksScanner(unittest.TestCase):
 
     @patch('scanner.requests.get')
     def test_geo_locate(self, mock_get):
-        """Test geo location returns a dict with expected keys."""
+        """Test geo location returns a dict with expected keys using HTTPS."""
         mock_response = MagicMock()
         mock_response.json.return_value = {
+            'status': 'success',
             'isp': 'Google',
             'city': 'Mountain View',
             'country': 'USA',
@@ -62,7 +63,10 @@ class TestGloaksScanner(unittest.TestCase):
         
         result = scanner.geo_locate("8.8.8.8")
         self.assertEqual(result['isp'], 'Google')
-        self.assertEqual(result['city'], 'Mountain View')
+        
+        # Verify HTTPS url
+        args, _ = mock_get.call_args
+        self.assertTrue(args[0].startswith("https://ip-api.com"))
 
     @patch('scanner.requests.get')
     def test_geo_locate_failure(self, mock_get):

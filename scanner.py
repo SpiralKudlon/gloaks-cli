@@ -1,6 +1,7 @@
 import socket
 import requests
 import concurrent.futures
+import config
 
 def get_ip(target):
     try:
@@ -10,11 +11,22 @@ def get_ip(target):
         return None
 
 def scan_headers(target):
-    """Returns a dictionary of HTTP headers."""
+    """Returns a dictionary of HTTP headers. Defaults to HTTPS, falls back to HTTP."""
     try:
-        response = requests.get(f"http://{target}", timeout=5)
+        if not target.startswith("http"):
+             url = f"https://{target}"
+        else:
+             url = target
+        response = requests.get(url, timeout=5)
         return dict(response.headers)
     except requests.exceptions.RequestException:
+        # Fallback to HTTP if HTTPS fails and no scheme was provided
+        if not target.startswith("http"):
+             try:
+                response = requests.get(f"http://{target}", timeout=5)
+                return dict(response.headers)
+             except requests.exceptions.RequestException:
+                return None
         return None
 
 def check_port(target_ip, port):
@@ -26,8 +38,6 @@ def check_port(target_ip, port):
     if result == 0:
         return port
     return None
-
-import config
 
 def scan_ports(target_ip, ports=None):
     """Returns a list of open ports using concurrent scanning."""
@@ -49,7 +59,10 @@ def scan_ports(target_ip, ports=None):
 def geo_locate(ip):
     """Returns a dictionary of geolocation data."""
     try:
-        response = requests.get(f"http://ip-api.com/json/{ip}").json()
+        # Use HTTPS for security
+        response = requests.get(f"https://ip-api.com/json/{ip}", timeout=10).json()
+        if response.get('status') == 'fail':
+             return None
         return {
             "isp": response.get("isp"),
             "city": response.get("city"),
