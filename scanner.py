@@ -27,8 +27,12 @@ def check_port(target_ip, port):
         return port
     return None
 
-def scan_ports(target_ip, ports=[21, 22, 80, 443, 3306, 8080]):
+import config
+
+def scan_ports(target_ip, ports=None):
     """Returns a list of open ports using concurrent scanning."""
+    if ports is None:
+        ports = config.DEFAULT_PORTS
     open_ports = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
         future_to_port = {executor.submit(check_port, target_ip, port): port for port in ports}
