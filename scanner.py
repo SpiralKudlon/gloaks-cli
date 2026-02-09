@@ -2,8 +2,23 @@ import socket
 import requests
 import concurrent.futures
 import config
+import re
+
+def is_valid_target(target):
+    """Validates if the target is a valid domain name or IP address."""
+    if not target or len(target) > 255:
+        return False
+    # Basic regex for domain (including subdomains) or IPv4
+    pattern = re.compile(
+        r'^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,63}$|'  # domain
+        r'^localhost$|'  # localhost
+        r'^(?:\d{1,3}\.){3}\d{1,3}$'  # IPv4
+    )
+    return bool(pattern.match(target))
 
 def get_ip(target):
+    if not is_valid_target(target):
+        return None
     try:
         ip = socket.gethostbyname(target)
         return ip
@@ -12,6 +27,8 @@ def get_ip(target):
 
 def scan_headers(target):
     """Returns a dictionary of HTTP headers. Defaults to HTTPS, falls back to HTTP."""
+    if not is_valid_target(target):
+        return None
     try:
         if not target.startswith("http"):
              url = f"https://{target}"

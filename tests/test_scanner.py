@@ -75,5 +75,27 @@ class TestGloaksScanner(unittest.TestCase):
         result = scanner.geo_locate("8.8.8.8")
         self.assertIsNone(result)
 
+    def test_is_valid_target(self):
+        """Test the input validation logic."""
+        self.assertTrue(scanner.is_valid_target("example.com"))
+        self.assertTrue(scanner.is_valid_target("sub.example.com"))
+        self.assertTrue(scanner.is_valid_target("localhost"))
+        self.assertTrue(scanner.is_valid_target("192.168.1.1"))
+        self.assertFalse(scanner.is_valid_target("invalid_domain"))
+        self.assertFalse(scanner.is_valid_target("http://example.com")) # Should not contain scheme
+        self.assertFalse(scanner.is_valid_target("example.com/path")) # Should not contain path
+        self.assertFalse(scanner.is_valid_target(""))
+        self.assertFalse(scanner.is_valid_target("!@#$%"))
+
+    def test_scan_headers_invalid_target(self):
+        """Test scan_headers returns None for invalid target."""
+        result = scanner.scan_headers("invalid_domain!@#")
+        self.assertIsNone(result)
+
+    def test_get_ip_invalid_target(self):
+        """Test get_ip returns None for invalid target."""
+        result = scanner.get_ip("invalid_domain!@#")
+        self.assertIsNone(result)
+
 if __name__ == '__main__':
     unittest.main()
