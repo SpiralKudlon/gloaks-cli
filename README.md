@@ -24,7 +24,7 @@ Gloaks requires **Python 3.10+**.
 
 ```bash
 # 1. Clone the repository
-git clone [https://github.com/YOUR_USERNAME/gloaks-cli.git](https://github.com/YOUR_USERNAME/gloaks-cli.git)
+git clone [https://github.com/SpiralKudlon/gloaks-cli.git](https://github.com/SpiralKudlon/gloaks-cli.git)
 
 # 2. Navigate to the directory
 cd gloaks-cli
