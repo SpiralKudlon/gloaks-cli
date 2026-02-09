@@ -1,6 +1,5 @@
 import socket
 import requests
-from colorama import Fore
 
 def get_ip(target):
     try:
@@ -10,34 +9,35 @@ def get_ip(target):
         return None
 
 def scan_headers(target):
-    print(f"{Fore.CYAN}[*] Scanning HTTP Headers...{Fore.RESET}")
+    """Returns a dictionary of HTTP headers."""
     try:
         response = requests.get(f"http://{target}", timeout=5)
-        for key, value in response.headers.items():
-            print(f"  {Fore.YELLOW}├─ {key}: {Fore.WHITE}{value}")
+        return dict(response.headers)
     except requests.exceptions.RequestException:
-        print(f"{Fore.RED}[!] Could not connect to HTTP service.{Fore.RESET}")
+        return None
 
 def scan_ports(target_ip, ports=[21, 22, 80, 443, 3306, 8080]):
-    print(f"\n{Fore.CYAN}[*] Quick Port Scan (Top ports)...{Fore.RESET}")
+    """Returns a list of open ports."""
+    open_ports = []
     for port in ports:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(0.5)
         result = sock.connect_ex((target_ip, port))
         if result == 0:
-            print(f"  {Fore.GREEN}[+] Port {port} OPEN{Fore.RESET}")
-        else:
-            # Uncomment below if you want to see closed ports
-            # print(f"  {Fore.RED}[-] Port {port} CLOSED{Fore.RESET}")
-            pass
+            open_ports.append(port)
         sock.close()
+    return open_ports
 
 def geo_locate(ip):
-    print(f"\n{Fore.CYAN}[*] Geolocation Data...{Fore.RESET}")
+    """Returns a dictionary of geolocation data."""
     try:
         response = requests.get(f"http://ip-api.com/json/{ip}").json()
-        print(f"  {Fore.YELLOW}├─ ISP: {Fore.WHITE}{response.get('isp')}")
-        print(f"  {Fore.YELLOW}├─ Location: {Fore.WHITE}{response.get('city')}, {response.get('country')}")
-        print(f"  {Fore.YELLOW}└─ Coordinates: {Fore.WHITE}{response.get('lat')}, {response.get('lon')}")
-    except:
-        print(f"{Fore.RED}[!] Geo-lookup failed.{Fore.RESET}")
+        return {
+            "isp": response.get("isp"),
+            "city": response.get("city"),
+            "country": response.get("country"),
+            "lat": response.get("lat"),
+            "lon": response.get("lon")
+        }
+    except Exception:
+        return None

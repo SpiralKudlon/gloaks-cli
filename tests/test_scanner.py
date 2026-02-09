@@ -31,11 +31,35 @@ class TestGloaksScanner(unittest.TestCase):
         # connect_ex returns 0 for success (Open Port)
         mock_sock_instance.connect_ex.return_value = 0
         
-        # We capture stdout to verify the print statement
-        with patch('sys.stdout') as fake_out:
-            scanner.scan_ports("127.0.0.1", [80])
-            # Check if print was called
-            self.assertTrue(mock_sock_instance.connect_ex.called)
+        result = scanner.scan_ports("127.0.0.1", [80])
+        self.assertEqual(result, [80])
+
+    @patch('scanner.requests.get')
+    def test_scan_headers(self, mock_get):
+        """Test header scanning returns a dict."""
+        mock_response = MagicMock()
+        mock_response.headers = {'Server': 'nginx'}
+        mock_get.return_value = mock_response
+        
+        result = scanner.scan_headers("example.com")
+        self.assertEqual(result, {'Server': 'nginx'})
+
+    @patch('scanner.requests.get')
+    def test_geo_locate(self, mock_get):
+        """Test geo location returns a dict with expected keys."""
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            'isp': 'Google',
+            'city': 'Mountain View',
+            'country': 'USA',
+            'lat': 37.4,
+            'lon': -122.0
+        }
+        mock_get.return_value = mock_response
+        
+        result = scanner.geo_locate("8.8.8.8")
+        self.assertEqual(result['isp'], 'Google')
+        self.assertEqual(result['city'], 'Mountain View')
 
 if __name__ == '__main__':
     unittest.main()
