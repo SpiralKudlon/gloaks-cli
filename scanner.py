@@ -16,17 +16,32 @@ def scan_headers(target):
     except requests.exceptions.RequestException:
         return None
 
+import concurrent.futures
+
+def check_port(target_ip, port):
+    """Helper function to check a single port."""
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.settimeout(0.5)
+    result = sock.connect_ex((target_ip, port))
+    sock.close()
+    if result == 0:
+        return port
+    return None
+
 def scan_ports(target_ip, ports=[21, 22, 80, 443, 3306, 8080]):
-    """Returns a list of open ports."""
+    """Returns a list of open ports using concurrent scanning."""
     open_ports = []
-    for port in ports:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(0.5)
-        result = sock.connect_ex((target_ip, port))
-        if result == 0:
-            open_ports.append(port)
-        sock.close()
-    return open_ports
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+        future_to_port = {executor.submit(check_port, target_ip, port): port for port in ports}
+        for future in concurrent.futures.as_completed(future_to_port):
+            port = future_to_port[future]
+            try:
+                result = future.result()
+                if result:
+                    open_ports.append(result)
+            except Exception:
+                pass
+    return sorted(open_ports)
 
 def geo_locate(ip):
     """Returns a dictionary of geolocation data."""

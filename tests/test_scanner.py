@@ -23,15 +23,18 @@ class TestGloaksScanner(unittest.TestCase):
         result = scanner.get_ip("invalid-domain-xyz.com")
         self.assertIsNone(result)
 
-    @patch('scanner.socket.socket')
-    def test_scan_port_open(self, mock_socket):
-        """Test that an open port is detected correctly."""
-        mock_sock_instance = MagicMock()
-        mock_socket.return_value = mock_sock_instance
-        # connect_ex returns 0 for success (Open Port)
-        mock_sock_instance.connect_ex.return_value = 0
+    @patch('scanner.check_port')
+    def test_scan_port_open(self, mock_check_port):
+        """Test that scan_ports returns correct open ports."""
+        # mock_check_port side_effect will determine what check_port returns
+        # If we pass [80], we want check_port to return 80.
         
-        result = scanner.scan_ports("127.0.0.1", [80])
+        def side_effect(ip, port):
+            return port if port == 80 else None
+            
+        mock_check_port.side_effect = side_effect
+        
+        result = scanner.scan_ports("127.0.0.1", [80, 22])
         self.assertEqual(result, [80])
 
     @patch('scanner.requests.get')
