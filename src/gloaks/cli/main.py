@@ -30,6 +30,13 @@ def scan(target: str, config: str, output_file: str, verbose: bool, scope: str):
     # Load configuration
     app_config = load_config(config)
     
+    # Input Validation
+    from gloaks.utils.validators import InputValidator
+    is_valid, error_msg = InputValidator.validate_target(target)
+    if not is_valid:
+        output.console.print(f"[bold red]Security Error:[/bold red] {error_msg}")
+        return
+
     # Validate Scope
     from gloaks.core.scope import ScopeValidator
     validator = ScopeValidator(scope or app_config.scope_file)

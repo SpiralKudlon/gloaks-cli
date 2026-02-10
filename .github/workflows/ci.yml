@@ -30,6 +30,11 @@ jobs:
         run: |
           pytest tests/
 
+      - name: Security Lint with Bandit
+        run: |
+          pip install bandit
+          bandit -r src/ -ll -ii
+
       - name: Lint
         run: |
           black --check src/ tests/

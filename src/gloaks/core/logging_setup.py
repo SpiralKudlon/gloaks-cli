@@ -3,6 +3,19 @@ import sys
 import structlog
 from typing import Optional
 
+import structlog
+from typing import Optional, Any, Dict
+
+def redact_secrets(logger: Any, method_name: str, event_dict: Dict[str, Any]) -> Dict[str, Any]:
+    """Redact sensitive keys from log events."""
+    sensitive_keys = {"api_key", "password", "token", "secret", "authorization"}
+    
+    for key in event_dict.copy():
+        if key.lower() in sensitive_keys:
+            event_dict[key] = "***REDACTED***"
+            
+    return event_dict
+
 def configure_logging(level: str = "INFO", log_format: str = "json", log_file: Optional[str] = None):
     """Configure structured logging for the application."""
     
@@ -15,6 +28,7 @@ def configure_logging(level: str = "INFO", log_format: str = "json", log_file: O
         structlog.processors.TimeStamper(fmt="iso"),
         structlog.processors.StackInfoRenderer(),
         structlog.processors.format_exc_info,
+        redact_secrets, # Add custom redaction processor
     ]
 
     if log_format == "json":
