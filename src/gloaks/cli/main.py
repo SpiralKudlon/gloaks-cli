@@ -88,5 +88,16 @@ def scan(target: str, config: str, output_file: str, verbose: bool, scope: str):
         logger.exception("Scan failed")
         click.echo(f"Error: {e}", err=True)
 
+@cli.command()
+@click.option("--host", default="127.0.0.1", help="Host to bind to")
+@click.option("--port", default=8000, help="Port to bind to")
+@click.option("--reload", is_flag=True, help="Enable auto-reload")
+def api(host: str, port: int, reload: bool):
+    """Start the Gloaks API server."""
+    import uvicorn
+    output.print_banner()
+    output.console.print(f"[bold green]Starting API server on {host}:{port}[/bold green]")
+    uvicorn.run("gloaks.api.app:app", host=host, port=port, reload=reload)
+
 if __name__ == "__main__":
     cli()
