@@ -18,6 +18,8 @@ def cli():
 @cli.command()
 @click.argument("target")
 @click.option("--config", "-c", type=click.Path(exists=True), help="Path to configuration file")
+@click.option("--output-file", "-o", help="Save results to JSON file")
+@click.option("--verbose", "-v", is_flag=True, help="Enable verbose logging")
 @click.option("--scope", "-s", type=click.Path(exists=True), help="Path to scope definition file")
 def scan(target: str, config: str, output_file: str, verbose: bool, scope: str):
     """Scan a target domain or IP address."""

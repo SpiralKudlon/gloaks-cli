@@ -29,7 +29,8 @@ class HttpAnalysisModule(ReconModule):
         logger.info("Starting HTTP analysis", target=target)
         
         try:
-            async with httpx.AsyncClient(verify=False, follow_redirects=follow_redirects) as client:
+            # MITM Vulnerability Fix: verify=True to ensure SSL certificate validation
+            async with httpx.AsyncClient(verify=True, follow_redirects=follow_redirects) as client:
                 try:
                     response = await client.get(url, timeout=timeout)
                 except (httpx.ConnectError, httpx.TimeoutException):
