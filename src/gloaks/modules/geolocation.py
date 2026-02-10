@@ -23,11 +23,15 @@ class GeolocationModule(ReconModule):
         provider = config.get("provider", "ip-api")
         timeout = config.get("timeout", 5.0)
         
-        # In a real implementation we would support multiple providers
-        # For now, we stick to ip-api.com as per previous version
-        url = f"http://ip-api.com/json/{target}"
+        if not self.api_key:
+             logger.warning("No API key configured for Geolocation module. Results may be limited and HTTP will be used for the free tier.")
+
+        # API endpoint (Enforce HTTPS for paid tier, fallback to HTTP for free tier)
+        # The free API (ip-api.com) only supports HTTP.
+        # The paid API (pro.ip-api.com) requires HTTPS and an API key.
+        url = f"https://pro.ip-api.com/json/{target}?key={self.api_key}" if self.api_key else f"http://ip-api.com/json/{target}"
         
-        logger.info("Starting geolocation scan", target=target, provider=provider)
+        logger.info("Starting geolocation scan", target=target, provider=provider, url=url)
         
         try:
             async with httpx.AsyncClient() as client:
