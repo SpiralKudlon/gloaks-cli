@@ -31,7 +31,12 @@ async def send_requests(url, api_key, count=20):
                 errors += 1
                 continue
             if r.status_code == 200:
-                success += 1
+                data = r.json()
+                if "id" in data and data["status"] == "pending":
+                    success += 1
+                else:
+                    print(f"Unexpected response format: {data}")
+                    errors += 1
             elif r.status_code == 429:
                 rate_limited += 1
             else:
