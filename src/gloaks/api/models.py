@@ -1,6 +1,3 @@
-from pydantic import BaseModel, HttpUrl
-from typing import List, Optional, Dict, Any
-
 from pydantic import BaseModel, HttpUrl, validator
 from typing import List, Optional, Dict, Any
 from gloaks.utils.validators import InputValidator

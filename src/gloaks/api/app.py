@@ -1,13 +1,3 @@
-from fastapi import FastAPI, BackgroundTasks
-from gloaks.api.models import ScanRequest, ScanResponse
-from gloaks.core.engine import GloaksEngine
-from gloaks.core.config import load_config
-import uuid
-import structlog
-
-logger = structlog.get_logger()
-app = FastAPI(title="Gloaks API", version="3.0.0")
-
 from fastapi import FastAPI, BackgroundTasks, HTTPException, Security, Depends
 from fastapi.security.api_key import APIKeyHeader, APIKey
 from starlette.status import HTTP_403_FORBIDDEN
@@ -17,6 +7,8 @@ from gloaks.core.config import load_config
 import uuid
 import structlog
 import os
+from collections import defaultdict
+import time
 
 logger = structlog.get_logger()
 app = FastAPI(title="Gloaks API", version="3.0.0")
@@ -26,9 +18,6 @@ API_KEY_NAME = "X-API-Key"
 api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=False)
 
 # Rate Limiting (Simple Token Bucket per Key)
-from collections import defaultdict
-import time
-
 RATE_LIMIT_CALLS = 10
 RATE_LIMIT_PERIOD = 60  # seconds
 request_history = defaultdict(list)
@@ -53,8 +42,7 @@ async def get_api_key(api_key_header: str = Security(api_key_header)):
         status_code=HTTP_403_FORBIDDEN, detail="Could not validate credentials"
     )
 
-# In-memory storage with simple cleanup mechanism (LRU-like or generic)
-# In production, this should be a database (PostgreSQL)
+# In-memory storage with simple cleanup mechanism
 scans = {}
 MAX_HISTORY = 100
 
@@ -67,16 +55,26 @@ def cleanup_old_scans():
         for k in sorted_keys[:excess]:
             del scans[k]
 
+async def run_scan_task(scan_id: str, target: str, config):
+    try:
+        engine = GloaksEngine(config)
+        results = await engine.run(target)
+        scans[scan_id]["status"] = "completed"
+        scans[scan_id]["results"] = results
+        logger.info("API Scan completed", scan_id=scan_id)
+    except Exception as e:
+        scans[scan_id]["status"] = "failed"
+        scans[scan_id]["results"] = {"error": str(e)}
+        logger.error("API Scan failed", scan_id=scan_id, error=str(e))
+
 @app.post("/scans", response_model=ScanResponse)
 async def create_scan(request: ScanRequest, background_tasks: BackgroundTasks, api_key: APIKey = Depends(get_api_key)):
     cleanup_old_scans()
     
     scan_id = str(uuid.uuid4())
-    scan_id = str(uuid.uuid4())
     config = load_config()
     
     # Update config with request overrides if needed
-    # (Simplified for now)
     
     scans[scan_id] = {
         "scan_id": scan_id,
@@ -100,15 +98,3 @@ async def get_scan(scan_id: str, api_key: APIKey = Depends(get_api_key)):
         return {"error": "Scan not found"} # Should retry 404
         
     return ScanResponse(**scan)
-
-async def run_scan_task(scan_id: str, target: str, config):
-    try:
-        engine = GloaksEngine(config)
-        results = await engine.run(target)
-        scans[scan_id]["status"] = "completed"
-        scans[scan_id]["results"] = results
-        logger.info("API Scan completed", scan_id=scan_id)
-    except Exception as e:
-        scans[scan_id]["status"] = "failed"
-        scans[scan_id]["results"] = {"error": str(e)}
-        logger.error("API Scan failed", scan_id=scan_id, error=str(e))
