@@ -1,6 +1,6 @@
 import asyncio
 import structlog
-from typing import List, Dict, Any, Type
+from typing import List, Dict, Any, Type, Optional
 from gloaks.core.config import GloaksConfig
 from gloaks.modules.base import ReconModule
 from gloaks.modules.geolocation import GeolocationModule
@@ -11,13 +11,14 @@ from gloaks.modules.dns_enum import DnsEnumModule
 logger = structlog.get_logger()
 
 class GloaksEngine:
-    def __init__(self, config: GloaksConfig):
+    def __init__(self, config: GloaksConfig, http_client: Optional[Any] = None):
         self.config = config
+        self.http_client = http_client
         self.results = {}
         self.modules: List[ReconModule] = [
             GeolocationModule(),
             PortScanModule(),
-            HttpAnalysisModule(),
+            HttpAnalysisModule(http_client=http_client),
             DnsEnumModule()
         ]
 
@@ -45,7 +46,7 @@ class GloaksEngine:
                 data = await module.run(target, module_config)
                 return module.name, data
             except Exception as e:
-                logger.error(f"Module {module.name} failed", error=str(e))
+                logger.exception("Module failed", module=module.name)
                 return module.name, {"error": str(e)}
 
         # Run all modules concurrently

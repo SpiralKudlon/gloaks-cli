@@ -1,11 +1,14 @@
 import httpx
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 import structlog
 from gloaks.modules.base import ReconModule
 
 logger = structlog.get_logger()
 
 class HttpAnalysisModule(ReconModule):
+    def __init__(self, http_client: Optional[httpx.AsyncClient] = None):
+        self.http_client = http_client
+
     @property
     def name(self) -> str:
         return "http_analysis"
@@ -30,7 +33,22 @@ class HttpAnalysisModule(ReconModule):
         
         try:
             # MITM Vulnerability Fix: verify=True to ensure SSL certificate validation
-            async with httpx.AsyncClient(verify=True, follow_redirects=follow_redirects) as client:
+            # Use shared client if available, usually created in app/cli context
+            client_context = None
+            client = self.http_client
+            
+            if not client:
+                 client = httpx.AsyncClient(verify=True, follow_redirects=follow_redirects)
+                 client_context = client
+            
+            try:
+                # If using shared client, we might need to adjust verify/redirects per request? 
+                # Httpx client is immutable for some configs. 
+                # We can't change verify on existing client easily per request if it differs using high level API?
+                # Actually Client(verify=True) is default.
+                # If shared client has different settings, we might need to respect them or create new one.
+                # For this optimization, assuming shared client has secure defaults.
+                
                 try:
                     response = await client.get(url, timeout=timeout)
                 except (httpx.ConnectError, httpx.TimeoutException):
@@ -59,23 +77,19 @@ class HttpAnalysisModule(ReconModule):
                     else:
                         header_results[key] = False
                         missing_headers.append(header_name)
-
-                # Server technology detection
-                technologies = []
-                if "Server" in headers:
-                    technologies.append(f"Server: {headers['Server']}")
-                if "X-Powered-By" in headers:
-                    technologies.append(f"Powered-By: {headers['X-Powered-By']}")
+            finally:
+                if client_context:
+                    await client_context.aclose()
                 
-                return {
-                    "status_code": response.status_code,
-                    "url": str(response.url),
-                    "headers": dict(headers),
-                    "security_headers": header_results,
-                    "missing_headers": missing_headers,
-                    "technologies": technologies
-                }
+            return {
+                "status_code": response.status_code,
+                "url": str(response.url),
+                "headers": dict(headers),
+                "security_headers": header_results,
+                "missing_headers": missing_headers,
+                "technologies": technologies
+            }
 
         except httpx.RequestError as exc:
-            logger.error(f"HTTP analysis failed: {exc}")
+            logger.error("HTTP analysis failed", error=str(exc))
             return {"error": str(exc)}

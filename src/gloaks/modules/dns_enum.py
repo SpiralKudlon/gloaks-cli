@@ -46,7 +46,7 @@ class DnsEnumModule(ReconModule):
                 # Record not found or error
                 results[record_type] = []
             except Exception as e:
-                logger.debug(f"DNS query error for {record_type}: {e}")
+                logger.debug("DNS query error", record_type=record_type, error=str(e))
                 results[record_type] = []
 
         await asyncio.gather(*[query(rt) for rt in record_types])

@@ -15,9 +15,9 @@ class GeolocationConfig(BaseSettings):
     api_key: Optional[str] = None
 
 class PortScanConfig(BaseSettings):
-    default_ports: List[int] = [21, 22, 80, 443, 3306, 8080]
+    default_ports: List[int] = [21, 22, 80, 443, 8080]
     timeout: float = 1.0
-    concurrency: int = 100
+    concurrency: int = 50
 
 class GloaksConfig(BaseSettings):
     block_out_of_scope: bool = True
@@ -54,7 +54,7 @@ def load_config(config_path: Optional[str] = None) -> GloaksConfig:
                         # Deep merge logic would go here, for now simple override
                         config_data.update(file_data)
                 break # Stop at first valid config file found for now
-            except Exception as e:
+            except (yaml.YAMLError, OSError) as e:
                 print(f"Warning: Failed to load config from {path}: {e}")
 
     # Pydantic Settings will handle env var overrides automatically 

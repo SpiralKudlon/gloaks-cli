@@ -7,11 +7,22 @@ from gloaks.core.config import load_config
 import uuid
 import structlog
 import os
+import httpx
 from collections import defaultdict
 import time
+from contextlib import asynccontextmanager
 
 logger = structlog.get_logger()
-app = FastAPI(title="Gloaks API", version="3.0.0")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: Create shared HTTP client
+    app.state.http_client = httpx.AsyncClient(verify=True)
+    yield
+    # Shutdown: Close client
+    await app.state.http_client.aclose()
+
+app = FastAPI(title="Gloaks API", version="3.0.0", lifespan=lifespan)
 
 # API Key Security
 API_KEY_NAME = "X-API-Key"
@@ -55,9 +66,9 @@ def cleanup_old_scans():
         for k in sorted_keys[:excess]:
             del scans[k]
 
-async def run_scan_task(scan_id: str, target: str, config):
+async def run_scan_task(scan_id: str, target: str, config, http_client):
     try:
-        engine = GloaksEngine(config)
+        engine = GloaksEngine(config, http_client=http_client)
         results = await engine.run(target)
         scans[scan_id]["status"] = "completed"
         scans[scan_id]["results"] = results
@@ -83,7 +94,7 @@ async def create_scan(request: ScanRequest, background_tasks: BackgroundTasks, a
         "results": None
     }
     
-    background_tasks.add_task(run_scan_task, scan_id, request.target, config)
+    background_tasks.add_task(run_scan_task, scan_id, request.target, config, app.state.http_client)
     
     return ScanResponse(
         scan_id=scan_id,
@@ -95,6 +106,6 @@ async def create_scan(request: ScanRequest, background_tasks: BackgroundTasks, a
 async def get_scan(scan_id: str, api_key: APIKey = Depends(get_api_key)):
     scan = scans.get(scan_id)
     if not scan:
-        return {"error": "Scan not found"} # Should retry 404
+        raise HTTPException(status_code=404, detail="Scan not found")
         
     return ScanResponse(**scan)

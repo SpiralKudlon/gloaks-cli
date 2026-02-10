@@ -1,6 +1,7 @@
 import yaml
 import re
 import socket
+import asyncio
 from typing import List, Optional, Dict
 import structlog
 from urllib.parse import urlparse
@@ -31,20 +32,31 @@ class ScopeValidator:
             logger.info("Scope loaded", 
                         allowed_domains=len(self.allowed_domains), 
                         allowed_ips=len(self.allowed_ips))
-        except Exception as e:
+        except (yaml.YAMLError, OSError) as e:
             logger.error("Failed to load scope file", error=str(e))
             # raise # Don't raise in constructor for tests if file invalid, but in real app handle better
 
-    def is_target_allowed(self, target: str) -> bool:
+    async def _resolve_ip(self, target: str) -> Optional[str]:
+        """Resolve IP asynchronously to avoid blocking."""
+        try:
+            # Use asyncio's getaddrinfo which runs in a thread pool (safe for async)
+            # or use aiodns if available. For simplicity and stdlib reliance:
+            loop = asyncio.get_running_loop()
+            info = await loop.getaddrinfo(target, None, family=socket.AF_INET)
+            return info[0][4][0] if info else None
+        except socket.gaierror:
+            return None
+        except Exception as e:
+            logger.warning("DNS resolution failed in scope validator", target=target, error=str(e))
+            return None
+
+    async def is_target_allowed(self, target: str) -> bool:
         """Check if a target is authorized for scanning."""
         if not self.scope_file:
             return True
             
         # Resolve target to IP if possible
-        try:
-            target_ip = socket.gethostbyname(target)
-        except socket.gaierror:
-            target_ip = None
+        target_ip = await self._resolve_ip(target)
 
         # Check Exclusions first
         if target in self.excluded_domains:

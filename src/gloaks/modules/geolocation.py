@@ -53,6 +53,6 @@ class GeolocationModule(ReconModule):
                 }
                 
         except httpx.RequestError as exc:
-            logger.error(f"Geolocation request failed: {exc}")
+            logger.error("Geolocation request failed", error=str(exc))
             return {"error": str(exc)}
             

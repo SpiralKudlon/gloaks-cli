@@ -7,7 +7,8 @@ from gloaks.core.engine import GloaksEngine
 from gloaks.cli import output
 
 # Initialize logging immediately for CLI usage
-configure_logging(level="WARNING", log_format="console")
+# User requested visible startup messages, so default to INFO
+configure_logging(level="INFO", log_format="console")
 logger = structlog.get_logger()
 
 @click.group()
@@ -43,7 +44,14 @@ def scan(target: str, config: str, output_file: str, verbose: bool, scope: str):
     from gloaks.core.scope import ScopeValidator
     validator = ScopeValidator(scope or app_config.scope_file)
     
-    if scope and not validator.is_target_allowed(target):
+    # Run async scope check
+    loop = asyncio.new_event_loop()
+    try:
+        is_allowed = loop.run_until_complete(validator.is_target_allowed(target))
+    finally:
+        loop.close()
+
+    if scope and not is_allowed:
         output.console.print(f"[bold red]Error:[/bold red] Target '{target}' is not in the authorized scope.")
         output.console.print(f"Scope file: {scope}")
         return

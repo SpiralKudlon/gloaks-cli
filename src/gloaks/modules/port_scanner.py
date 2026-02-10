@@ -25,32 +25,38 @@ class PortScanModule(ReconModule):
         timeout = config.get("timeout", 1.0)
         concurrency = config.get("concurrency", 100)
         
-        logger.info(f"Starting port scan on {len(ports)} ports", target=target, concurrency=concurrency)
+        logger.info("Starting port scan", ports_count=len(ports), target=target, concurrency=concurrency)
         
         semaphore = asyncio.Semaphore(concurrency)
         open_ports = []
         
         async def scan_port(port: int):
             async with semaphore:
+                writer = None
                 try:
                     conn = asyncio.open_connection(target, port)
                     reader, writer = await asyncio.wait_for(conn, timeout=timeout)
                     
                     # If we get here, the port is open
-                    logger.debug(f"Port open: {port}")
+                    logger.debug("Port open", port=port)
                     open_ports.append({
                         "port": port,
                         "state": "open",
                         "protocol": "tcp"
                     })
                     
-                    writer.close()
-                    await writer.wait_closed()
                 except (asyncio.TimeoutError, ConnectionRefusedError, OSError):
                      # Port is closed or filtered
                      pass
                 except Exception as e:
-                    logger.debug(f"Error scanning port {port}: {e}")
+                    logger.debug("Error scanning port", port=port, error=str(e))
+                finally:
+                    if writer:
+                        writer.close()
+                        try:
+                            await writer.wait_closed()
+                        except Exception:
+                            pass
 
         # Create tasks
         tasks = [scan_port(port) for port in ports]
