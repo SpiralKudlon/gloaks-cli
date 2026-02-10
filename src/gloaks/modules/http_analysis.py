@@ -81,6 +81,13 @@ class HttpAnalysisModule(ReconModule):
                 if client_context:
                     await client_context.aclose()
                 
+            # Server technology detection
+            technologies = []
+            if "Server" in headers:
+                technologies.append(f"Server: {headers['Server']}")
+            if "X-Powered-By" in headers:
+                technologies.append(f"Powered-By: {headers['X-Powered-By']}")
+
             return {
                 "status_code": response.status_code,
                 "url": str(response.url),
