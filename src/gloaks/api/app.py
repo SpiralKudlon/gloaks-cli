@@ -1,7 +1,8 @@
 from fastapi import FastAPI, BackgroundTasks, HTTPException, Security, Depends, Request
 from fastapi.security.api_key import APIKeyHeader, APIKey
 from starlette.status import HTTP_403_FORBIDDEN
-from sqlmodel import Session, select
+from sqlmodel import select
+from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Dict, Optional
 import asyncio
 import uuid
@@ -9,6 +10,7 @@ import structlog
 import os
 import httpx
 import time
+import secrets
 from datetime import datetime
 from contextlib import asynccontextmanager
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -43,8 +45,16 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
 async def lifespan(app: FastAPI):
     # Startup
     logger.info("Starting up Gloaks API...")
-    create_db_and_tables()
+    await create_db_and_tables()
     app.state.http_client = httpx.AsyncClient(verify=True)
+    
+    # Generate API key if not set
+    # Using 'environ' allows us to set it dynamically if missing
+    if not os.environ.get("GLOAKS_API_KEY"):
+        generated_key = secrets.token_urlsafe(32)
+        os.environ["GLOAKS_API_KEY"] = generated_key
+        logger.critical("No API key configured. Generated secure key", api_key=generated_key)
+        # Note: In production logs, this might be risky, but essential for first run CLI usage without env
     
     yield
     
@@ -79,88 +89,97 @@ def check_rate_limit(api_key: str):
     request_history[api_key].append(now)
 
 async def get_api_key(api_key_header: str = Security(api_key_header)):
-    expected_key = os.getenv("GLOAKS_API_KEY", "gloaks-secret-123")
+    # Fetch from environment variable which might be set during startup
+    expected_key = os.environ.get("GLOAKS_API_KEY")
+    if not expected_key:
+         # Should not happen given lifespan logic, but fail safe
+         raise HTTPException(status_code=500, detail="Server misconfiguration: API Key not set")
+         
     if api_key_header == expected_key:
         check_rate_limit(api_key_header)
         return api_key_header
+    
     raise HTTPException(
         status_code=HTTP_403_FORBIDDEN, detail="Could not validate credentials"
     )
 
-async def run_scan_task(scan_id: str, target: str, config, http_client, session: Session):
+async def run_scan_task(scan_id: str, target: str, config, http_client, session_factory):
+    # Pass session_factory instead of session object to manage lifecycle properly?
+    # Or rely on dependency injection if possible. 
+    # BACKGROUND TASKS run outside request context, so dependency injection of `session` 
+    # from endpoint (which is closed after response) is invalid!
+    # The previous implementation was buggy there too (reusing closed session potentially).
+    
+    # We must create a new session for the background task.
+    
     # Create cancellation token for this task
     token = asyncio.Event()
     cancellation_tokens[scan_id] = token
     
-    try:
-        # Update status to running
-        scan = session.get(Scan, scan_id)
-        if scan:
-            scan.status = "running"
-            session.add(scan)
-            session.commit()
-
-        engine = GloaksEngine(config, http_client=http_client)
-        
-        # Check if cancelled before starting (race condition check)
-        if token.is_set():
-             raise asyncio.CancelledError()
-
-        results = await engine.run(target, cancellation_token=token)
-        
-        # Fresh session might be needed if long running, but here we reuse
-        # In production with async DB, we'd use async session. 
-        # For SQLite sync session in threadpool (FastAPI default for background tasks? No)
-        # BackgroundTasks run in threadpool if sync, but this is async func.
-        # It runs on event loop. SQLModel Session is sync (blocking).
-        # This will block the event loop! 
-        # WARNING: We are using sync Session in async function. 
-        # This is bad practice for high load but acceptable for MVP/SQLite.
-        # For proper async, we need AsyncSession from sqlmodel.ext.asyncio
-        # Fixing this properly requires engine change to async or running in thread.
-        # Given constraint, we'll keep it simple but note the block.
-        
-        scan = session.get(Scan, scan_id)
-        if scan:
-            if token.is_set() or results.get("status") == "cancelled":
-                scan.status = "cancelled"
-            else:
-                scan.status = "completed"
-                scan.results = results
-            scan.updated_at = datetime.utcnow()
-            session.add(scan)
-            session.commit()
-            
-        logger.info("API Scan completed", scan_id=scan_id)
-        
-    except (asyncio.CancelledError, Exception) as e:
-        is_cancelled = isinstance(e, asyncio.CancelledError) or token.is_set()
-        status = "cancelled" if is_cancelled else "failed"
-        error_msg = str(e) if not is_cancelled else "Scan cancelled by user"
-        
-        logger.error(f"API Scan {status}", scan_id=scan_id, error=error_msg)
-        
+    # Create new session
+    async with session_factory() as session:
         try:
-            scan = session.get(Scan, scan_id)
+            # Update status to running
+            scan = await session.get(Scan, scan_id)
             if scan:
-                scan.status = status
-                if not is_cancelled:
-                     scan.results = {"error": error_msg}
+                scan.status = "running"
+                session.add(scan)
+                await session.commit()
+
+            engine = GloaksEngine(config, http_client=http_client)
+            
+            # Check if cancelled before starting (race condition check)
+            if token.is_set():
+                 raise asyncio.CancelledError()
+
+            results = await engine.run(target, cancellation_token=token)
+            
+            scan = await session.get(Scan, scan_id)
+            if scan:
+                if token.is_set() or results.get("status") == "cancelled":
+                    scan.status = "cancelled"
+                else:
+                    scan.status = "completed"
+                    scan.results = results
                 scan.updated_at = datetime.utcnow()
                 session.add(scan)
-                session.commit()
-        except Exception as db_e:
-            logger.error("Failed to update scan status", error=str(db_e))
+                await session.commit()
+                
+            logger.info("API Scan completed", scan_id=scan_id)
             
-    finally:
-        # Cleanup
-        running_tasks.pop(scan_id, None)
-        cancellation_tokens.pop(scan_id, None)
+        except (asyncio.CancelledError, Exception) as e:
+            is_cancelled = isinstance(e, asyncio.CancelledError) or token.is_set()
+            status = "cancelled" if is_cancelled else "failed"
+            error_msg = str(e) if not is_cancelled else "Scan cancelled by user"
+            
+            logger.error(f"API Scan {status}", scan_id=scan_id, error=error_msg)
+            
+            try:
+                # Need fresh transaction/session? We are in one.
+                # If commit failed above, session might be rollback state.
+                # Safe practice: await session.rollback()
+                await session.rollback()
+                
+                scan = await session.get(Scan, scan_id)
+                if scan:
+                    scan.status = status
+                    if not is_cancelled:
+                         scan.results = {"error": error_msg}
+                    scan.updated_at = datetime.utcnow()
+                    session.add(scan)
+                    await session.commit()
+            except Exception as db_e:
+                logger.error("Failed to update scan status", error=str(db_e))
+                
+        finally:
+            # Cleanup global dictionaries
+            running_tasks.pop(scan_id, None)
+            cancellation_tokens.pop(scan_id, None)
 
 @app.post("/scans", response_model=ScanResponse)
 async def create_scan(
     request: ScanRequest, 
-    session: Session = Depends(get_session),
+    session: AsyncSession = Depends(get_session),
     api_key: APIKey = Depends(get_api_key)
 ):
     scan_id = str(uuid.uuid4())
@@ -173,13 +192,24 @@ async def create_scan(
         config=request.config
     )
     session.add(new_scan)
-    session.commit()
-    session.refresh(new_scan)
+    await session.commit()
+    await session.refresh(new_scan)
     
-    # We must create a task manually to track it, instead of BackgroundTasks
-    # BackgroundTasks doesn't give us the Task object easily to cancel.
+    # We must create a task manually to track it.
+    # We pass session_factory (get_session used as generator, need callable)
+    # The 'get_session' logic assumes 'sessionmaker' logic inside.
+    # We need access to the sessionmaker or similar factory.
+    # Or we can just import it.
+    from gloaks.core.database import engine
+    from sqlalchemy.orm import sessionmaker
+    
+    # Create a factory for the background task
+    async_session_factory = sessionmaker(
+        engine, class_=AsyncSession, expire_on_commit=False
+    )
+    
     task = asyncio.create_task(
-        run_scan_task(scan_id, request.target, config, app.state.http_client, session)
+        run_scan_task(scan_id, request.target, config, app.state.http_client, async_session_factory)
     )
     running_tasks[scan_id] = task
     
@@ -188,10 +218,10 @@ async def create_scan(
 @app.get("/scans/{scan_id}", response_model=ScanResponse)
 async def get_scan(
     scan_id: str, 
-    session: Session = Depends(get_session),
+    session: AsyncSession = Depends(get_session),
     api_key: APIKey = Depends(get_api_key)
 ):
-    scan = session.get(Scan, scan_id)
+    scan = await session.get(Scan, scan_id)
     if not scan:
         raise HTTPException(status_code=404, detail="Scan not found")
     return scan
@@ -199,10 +229,10 @@ async def get_scan(
 @app.post("/scans/{scan_id}/cancel", response_model=ScanResponse)
 async def cancel_scan(
     scan_id: str,
-    session: Session = Depends(get_session),
+    session: AsyncSession = Depends(get_session),
     api_key: APIKey = Depends(get_api_key)
 ):
-    scan = session.get(Scan, scan_id)
+    scan = await session.get(Scan, scan_id)
     if not scan:
         raise HTTPException(status_code=404, detail="Scan not found")
         
@@ -214,8 +244,8 @@ async def cancel_scan(
         
     scan.status = "cancelling"
     session.add(scan)
-    session.commit()
-    session.refresh(scan)
+    await session.commit()
+    await session.refresh(scan)
     return scan
 
 @app.get("/health")
