@@ -34,25 +34,34 @@ class GeolocationModule(ReconModule):
         logger.info("Starting geolocation scan", target=target, provider=provider, url=url)
         
         try:
-            async with httpx.AsyncClient() as client:
-                response = await client.get(url, timeout=timeout)
+            # Use shared client if available, otherwise context managed fallback
+            if self.http_client:
+                response = await self.http_client.get(url, timeout=timeout)
                 response.raise_for_status()
                 data = response.json()
-                
-                if data.get("status") == "fail":
-                    logger.warning("Geolocation lookup failed", reason=data.get("message"))
-                    return {"error": data.get("message")}
-                
-                return {
-                    "country": data.get("country"),
-                    "city": data.get("city"),
-                    "isp": data.get("isp"),
-                    "lat": data.get("lat"),
-                    "lon": data.get("lon"),
-                    "ip": data.get("query")
-                }
+                return self._parse_response(data)
+            else:
+                async with httpx.AsyncClient() as client:
+                    response = await client.get(url, timeout=timeout)
+                    response.raise_for_status()
+                    data = response.json()
+                    return self._parse_response(data)
                 
         except httpx.RequestError as exc:
             logger.error("Geolocation request failed", error=str(exc))
             return {"error": str(exc)}
+
+    def _parse_response(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        if data.get("status") == "fail":
+            logger.warning("Geolocation lookup failed", reason=data.get("message"))
+            return {"error": data.get("message")}
+        
+        return {
+            "country": data.get("country"),
+            "city": data.get("city"),
+            "isp": data.get("isp"),
+            "lat": data.get("lat"),
+            "lon": data.get("lon"),
+            "ip": data.get("query")
+        }
             

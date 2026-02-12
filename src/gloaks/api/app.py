@@ -25,6 +25,7 @@ logger = structlog.get_logger()
 # Global state for job management
 running_tasks: Dict[str, asyncio.Task] = {}
 cancellation_tokens: Dict[str, asyncio.Event] = {}
+jobs_lock = asyncio.Lock()
 
 class RequestLoggingMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
@@ -60,11 +61,13 @@ async def lifespan(app: FastAPI):
     
     # Shutdown
     logger.info("Shutting down Gloaks API...")
+    logger.info("Shutting down Gloaks API...")
     # Cancel all running tasks
-    for scan_id, task in running_tasks.items():
-        if not task.done():
-            logger.info("Cancelling active scan", scan_id=scan_id)
-            task.cancel()
+    async with jobs_lock:
+        for scan_id, task in running_tasks.items():
+            if not task.done():
+                logger.info("Cancelling active scan", scan_id=scan_id)
+                task.cancel()
     
     await app.state.http_client.aclose()
 
@@ -104,17 +107,10 @@ async def get_api_key(api_key_header: str = Security(api_key_header)):
     )
 
 async def run_scan_task(scan_id: str, target: str, config, http_client, session_factory):
-    # Pass session_factory instead of session object to manage lifecycle properly?
-    # Or rely on dependency injection if possible. 
-    # BACKGROUND TASKS run outside request context, so dependency injection of `session` 
-    # from endpoint (which is closed after response) is invalid!
-    # The previous implementation was buggy there too (reusing closed session potentially).
-    
-    # We must create a new session for the background task.
-    
     # Create cancellation token for this task
     token = asyncio.Event()
-    cancellation_tokens[scan_id] = token
+    async with jobs_lock:
+        cancellation_tokens[scan_id] = token
     
     # Create new session
     async with session_factory() as session:
@@ -173,8 +169,9 @@ async def run_scan_task(scan_id: str, target: str, config, http_client, session_
                 
         finally:
             # Cleanup global dictionaries
-            running_tasks.pop(scan_id, None)
-            cancellation_tokens.pop(scan_id, None)
+            async with jobs_lock:
+                running_tasks.pop(scan_id, None)
+                cancellation_tokens.pop(scan_id, None)
 
 @app.post("/scans", response_model=ScanResponse)
 async def create_scan(
@@ -211,7 +208,8 @@ async def create_scan(
     task = asyncio.create_task(
         run_scan_task(scan_id, request.target, config, app.state.http_client, async_session_factory)
     )
-    running_tasks[scan_id] = task
+    async with jobs_lock:
+        running_tasks[scan_id] = task
     
     return new_scan
 
@@ -236,11 +234,15 @@ async def cancel_scan(
     if not scan:
         raise HTTPException(status_code=404, detail="Scan not found")
         
-    if scan_id in cancellation_tokens:
-        cancellation_tokens[scan_id].set()
+    if not scan:
+        raise HTTPException(status_code=404, detail="Scan not found")
         
-    if scan_id in running_tasks:
-        running_tasks[scan_id].cancel()
+    async with jobs_lock:
+        if scan_id in cancellation_tokens:
+            cancellation_tokens[scan_id].set()
+        
+        if scan_id in running_tasks:
+            running_tasks[scan_id].cancel()
         
     scan.status = "cancelling"
     session.add(scan)
@@ -250,4 +252,6 @@ async def cancel_scan(
 
 @app.get("/health")
 async def health_check():
-    return {"status": "ok", "version": "3.0.0", "active_scans": len(running_tasks)}
+    async with jobs_lock:
+        count = len(running_tasks)
+    return {"status": "ok", "version": "3.0.0", "active_scans": count}
